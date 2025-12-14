@@ -40,7 +40,7 @@ class DiscreteGeneralizedPlant:
 
 
 
-def structured_output_feedback_h2(plant, rel_order):
+def structured_output_feedback_h2(plant, rel_order, tol = 1e-6):
     """
     Structured H2 output-feedback synthesis.
     
@@ -124,7 +124,7 @@ def structured_output_feedback_h2(plant, rel_order):
     B_aug = np.hstack((Bv @ Em, b0))
 
     # Controllable subspace reduction
-    tol = 1e-4
+
     TR, Ar, _ = controllable_subspace(Av, B_aug, tol)
     # Left projection
     TL = TR.T
@@ -142,9 +142,15 @@ def structured_output_feedback_h2(plant, rel_order):
     S = Cr.T @ R @ Dm
 
     Rinv = np.linalg.inv(Rm)
+    
     Av_tilde = Ar - Brm @ Rinv @ S.T
+    Av_tilde = Av_tilde.astype(np.float64)
+    
     Q_tilde = Q - S @ Rinv @ S.T
+    Q_tilde = Q_tilde.astype(np.float64)
 
+
+    print(Ar, Brm)
     # Terminal Riccati
     Xred_list[m] = solve_discrete_are(Av_tilde, Brm, Q_tilde, Rm)
     Kred_list[m] = - np.linalg.inv(Brm.T @ Xred_list[m] @ Brm + Rm) @ ( Ar.T @ Xred_list[m] @ Brm + S).T  # simplified
@@ -237,7 +243,6 @@ def structured_output_feedback_h2(plant, rel_order):
 
     vecQ_fir = ct.ss(A_fir, B_fir, C_fir, D_fir, dt)
     vecQ_ss = ct.parallel(vecQ_fir, qtail_delayed)
-    tol = 1e-6
     Q, _ = minimal(ivec_DTss.ivec_DTstatespace(vecQ_ss, nu, ny),tol)
 
     # Compute Jy matrices
@@ -251,12 +256,9 @@ def structured_output_feedback_h2(plant, rel_order):
     Jy = ct.ss(AJy, BJy, CJy, DJy, dt)
 
     # Compute LFT: KH2dis = minimal2(lft(Jy, -Q), tol)
-    print(AJy,BJy,CJy,DJy)
+    # print(AJy,BJy,CJy,DJy)
 
     KH2dis, _ = minimal(lft(Jy, Q), tol)
-    # KH2dis = lft(Jy, Q)
-    # Compute H2 norm (or 2-norm) of closed-loop system
-
 
     return KH2dis
 

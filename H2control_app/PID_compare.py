@@ -10,6 +10,60 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import matplotlib.image as mpimg
 
+import numpy as np
+import control as ct
+
+def pid_to_discrete_ss(P, I, D, n, dt, n_channels=3):
+    """
+    Convert a PID controller with derivative filter into a discrete-time
+    state-space system.
+    
+    Parameters
+    ----------
+    P, I, D : floats
+        PID gains.
+    n : float
+        Derivative filter parameter.
+    dt : float
+        Sampling time.
+    n_channels : int
+        Number of diagonal channels (MIMO).
+    
+    Returns
+    -------
+    sysd : control.StateSpace
+        Discrete-time state-space representation of the PID controller.
+    """
+    # Continuous-time SISO PID as state-space
+    # States: x = [integrator, derivative_filter]
+    Ac = np.array([[0, 0],
+                   [0, -n]])
+    Bc = np.array([[1],
+                   [1]])
+    Cc = np.array([[I, D*n]])
+    Dc = np.array([[P]])
+    
+    # Augment for integrator: x_i_dot = error (u input)
+    # Already handled by first row of Ac/Bc
+    
+    sysc = ct.ss(Ac, Bc, Cc, Dc)
+    
+    # Discretize
+    sysd_siso = ct.c2d(sysc, dt, method='zoh')
+    
+    # Create MIMO PID by stacking diagonally
+    sysd_list = [sysd_siso for _ in range(n_channels)]
+    sysd_mimo = ct.append(*sysd_list)
+    
+    # Optionally interconnect to form n_channels x n_channels diagonal
+    # Use connect to get proper input/output ordering if needed
+    
+    return sysd_mimo
+
+# Example usage:
+
+
+
 
 if __name__ == "__main__":
     # -----------------------------
@@ -72,11 +126,19 @@ if __name__ == "__main__":
     # -----------------------------
     A = kron(np.eye(nAgents), A0dt)
 
-    gamma1 = 1
-    gamma2 = 5
-    alpha  = 2
+    # PID parameters
+    P = 0.15
+    I = 0.001
+    D = 1
+    n = 0.05
 
-    # Output matrix C2
+
+    KPID_dt = pid_to_discrete_ss(P, I, D, n, dt, n_channels=3)
+    print(KPID_dt)
+
+
+    ## Redefining system matrices, removing weights
+
     C2 = kron(np.eye(nAgents), np.array([[0, 0, 1]]))
 
     for ii in range(1, nAgents):
@@ -86,36 +148,6 @@ if __name__ == "__main__":
     # Control input
     B2 = kron(np.eye(nAgents), B0dt[:, [0]])
 
-    # Disturbance inputs
-    Bw0  = kron(np.ones((nAgents, 1)), B0dt[:, [1]])
-    Bw12 = np.hstack([B2 * gamma2, B2 * 0])
-
-    B1 = np.hstack([Bw0, Bw12])
-
-    # Performance output
-    C1 = np.vstack([
-        C2,
-        np.zeros((nAgents, 3*nAgents))
-    ])
-
-    # Feedthrough matrices
-    D11 = np.zeros((2*nAgents, 2*nAgents + 1))
-    D12 = np.vstack([
-        np.zeros((nAgents, nAgents)),
-        np.eye(nAgents) * alpha
-    ])
-
-    D21 = np.hstack([
-        np.zeros((nAgents, nAgents + 1)),
-        np.eye(nAgents) * gamma1
-    ])
-
-    D22 = np.zeros((nAgents, nAgents))
-    P_platoon = dh2.DiscreteGeneralizedPlant(A, B1, B2, C1, C2, D11, D12, D21, D22, dt)
-    Kopt = structured_output_feedback_h2(P_platoon, delayMat, tol = 1e-6)
-
-
-    ## Redefining system matrices, removing weights
     Bw0  = kron(np.ones((nAgents, 1)), B0dt[:, [1]])
     Bw12 = np.hstack([B2, B2 * 0])
 
@@ -152,7 +184,7 @@ if __name__ == "__main__":
     bottom = np.hstack([D21, D22])
     D = np.vstack([top, bottom])
     P = ct.ss(A, B, C, D, dt)
-    sys_cl = lft(P, Kopt)
+    sys_cl = lft(P, KPID_dt)
 
     # --- Example parameters ---
 
@@ -167,10 +199,14 @@ if __name__ == "__main__":
 
     # --- Generate process noise w ---
     np.random.seed(42)
-    w = np.random.normal(0, 0.2, size=(N, nw))  # small white noise
+    w = np.random.normal(0, 0.1, size=(N, nw))  # small white noise
     impulse_index = int(1/dt)
-    w[impulse_index, 0] = 0  # first channel impulse at t=1s
-    w[impulse_index + 1, 0] = -0
+    w[impulse_index, 0] = 4.0  # first channel impulse at t=1s
+    w[impulse_index + 1, 0] = -4.0
+    # --- Closed-loop system ---
+    # Suppose sys_cl = ss(A_cl, B_w, C_cl, D_w) with feedback applied
+    # For example: sys_cl = control.lft(P, K)
+    # sys_cl should have input = w, output = z (or y)
 
     # Simulate
     x = np.zeros((N+1, nx))
@@ -214,6 +250,9 @@ if __name__ == "__main__":
     # N time steps, 4 cars
     # For demo, let's assume z_cumulative has 3 cars (1st car relative to 0)
     # We'll add reference car 0 at z=0
+
+
+
 
     N = z_cumulative.shape[0]
     cars_z = np.zeros((N, 4))
@@ -284,5 +323,3 @@ if __name__ == "__main__":
     anim = FuncAnimation(fig, animate, frames = N, interval= dt*100, blit=True)
 
     plt.show()
-
-    print("Optimal structured controller Kopt:",Kopt.D)

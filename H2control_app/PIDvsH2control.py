@@ -9,6 +9,8 @@ import H2control.DistributedH2controlTF as dh2
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import matplotlib.image as mpimg
+from .PID_compare import pid_to_discrete_ss
+
 
 
 if __name__ == "__main__":
@@ -112,7 +114,7 @@ if __name__ == "__main__":
 
     D22 = np.zeros((nAgents, nAgents))
     P_platoon = dh2.DiscreteGeneralizedPlant(A, B1, B2, C1, C2, D11, D12, D21, D22, dt)
-    Kopt = structured_output_feedback_h2(P_platoon, delayMat, tol = 1e-6)
+    Kopt = structured_output_feedback_h2(P_platoon, delayMat, tol = 1e-4)
 
 
     ## Redefining system matrices, removing weights
@@ -151,10 +153,15 @@ if __name__ == "__main__":
     top = np.hstack([D11, D12])
     bottom = np.hstack([D21, D22])
     D = np.vstack([top, bottom])
-    P = ct.ss(A, B, C, D, dt)
-    sys_cl = lft(P, Kopt)
-
+    P_platoon = ct.ss(A, B, C, D, dt)
+    sys_cl = lft(P_platoon, Kopt)
+    pPID = 0.03
+    iPID = 0.001
+    dPID = 1
+    nPID = 0.05
+    KPID_dt = pid_to_discrete_ss(pPID, iPID, dPID, nPID, dt, nAgents)
     # --- Example parameters ---
+    sys_cl_PID = lft(P_platoon, KPID_dt)
 
     Tsim = 20.0          # total simulation time in seconds
     N = int(Tsim/dt)     # number of steps
@@ -167,10 +174,10 @@ if __name__ == "__main__":
 
     # --- Generate process noise w ---
     np.random.seed(42)
-    w = np.random.normal(0, 0.2, size=(N, nw))  # small white noise
+    w = np.random.normal(0, 0.1, size=(N, nw))  # small white noise
     impulse_index = int(1/dt)
-    w[impulse_index, 0] = 0  # first channel impulse at t=1s
-    w[impulse_index + 1, 0] = -0
+    w[impulse_index, 0] = 4.0  # first channel impulse at t=1s
+    w[impulse_index + 1, 0] = -4.0
 
     # Simulate
     x = np.zeros((N+1, nx))
@@ -198,91 +205,117 @@ if __name__ == "__main__":
     z_cumulative[:, 1] = z_rel[:, 0] + z_rel[:, 1] + 2*d + delta_z  # second car
     z_cumulative[:, 2] = z_rel[:, 0] + z_rel[:, 1] + z_rel[:, 2] + 3*d + delta_z  # third car
     # # --- Plot results ---
-    # t = np.arange(N)*dt
-    # plt.figure(figsize=(8,4))
 
-    # for i in range(3):
-    #     plt.plot(t, z_cumulative[:, i], label=f'z_cumulative[{i}]')
-    # plt.xlabel('Time [s]')
-    # plt.ylabel('Output')
-    # plt.title('Platoon system outputs with noise')
-    # plt.legend()
-    # plt.grid(True)
-    # plt.show()
 
-    # --- Example: z_cumulative from your simulation ---
-    # N time steps, 4 cars
-    # For demo, let's assume z_cumulative has 3 cars (1st car relative to 0)
-    # We'll add reference car 0 at z=0
-
+    
     N = z_cumulative.shape[0]
-    cars_z = np.zeros((N, 4))
-    cars_z[:, 0] = delta_z          # reference car 0
-    cars_z[:, 1:4] = z_cumulative[:, :3]
+    cars_z_top = np.zeros((N, 4))
+    cars_z_top[:, 0] = delta_z          # reference car 0
+    cars_z_top[:, 1:4] = z_cumulative[:, :3]
 
-    # --- Load car icon ---
+    # PID controller simulation
+    nx = sys_cl_PID.A.shape[0]  # state dimension
+    nz = sys_cl_PID.C.shape[0]  # output dimension
+    x = np.zeros((N+1, nx))
+    z = np.zeros((N, nz))
+    x0 = np.zeros(nx)
+
+    x[0] = x0
+    # w0: disturbance on car0's acceleration/speed (shape N,)
+    delta_v = np.zeros(N+1)  # velocity change
+    delta_z = np.zeros(N+1)  # position change
+
+    for k in range(1, N+1):
+        delta_v[k] = delta_v[k-1] + w[k-1,0] * dt      # integrate acceleration -> velocity
+        delta_z[k] = delta_z[k-1] + delta_v[k] * dt   # integrate velocity -> position
+
+    # Remove the first element to match z shape
+    delta_z = delta_z[1:]  # shape (N,)
+    for k in range(N):
+        z[k] = sys_cl_PID.C @ x[k] + sys_cl_PID.D @ w[k]
+        x[k+1] = sys_cl_PID.A @ x[k] + sys_cl_PID.B @ w[k]
+
+    z_rel = z[:, :3]  # shape (N, 3)
+
+    # Compute cumulative distance relative to car 0
+    z_cumulative = np.zeros_like(z_rel)
+    z_cumulative[:, 0] = z_rel[:, 0] + d + delta_z           # first car relative to reference
+    z_cumulative[:, 1] = z_rel[:, 0] + z_rel[:, 1] + 2*d + delta_z  # second car
+    z_cumulative[:, 2] = z_rel[:, 0] + z_rel[:, 1] + z_rel[:, 2] + 3*d + delta_z  # third car
+    cars_z_pid = np.zeros((N, 4))
+    cars_z_pid[:, 0] = delta_z          # reference car 0
+    cars_z_pid[:, 1:4] = z_cumulative[:, :3]
+
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     car_path = os.path.join(script_dir, 'car.png')
-    car_icon = mpimg.imread(car_path) # Make sure the file exists
-
-    # --- Setup figure ---
-    fig, ax = plt.subplots(figsize=(8, 16))
-    ax.set_xlim(-5, 3 * d + 10)  # x fixed
-    ax.set_ylim(0, 5)
-    ax.set_xlabel('Z (distance substract nominal translation)')
-    ax.set_title('Platoon Cars Animated')
-    ghost_imgs = []
-
-    for i in range(4):
-        im = ax.imshow(car_icon, extent=[cars_z[0,i]-1, cars_z[0,i]+1, 0, 2], alpha=0.3, zorder=1)
-        ghost_imgs.append(im)
-    # Create image artists for each car
-    car_imgs = []
-    x_positions = [0, 0, 0, 0]  # x positions of cars
-    for i in range(4):
-        im = ax.imshow(car_icon, extent=[cars_z[0,i]-1, cars_z[0,i]+1, 0, 2], alpha=0, zorder=5)
-        car_imgs.append(im)
-    # --- Moving trees ---
     tree_path = os.path.join(script_dir, 'tree.png')
-    tree_icon = mpimg.imread(tree_path)
-    num_trees = 5
-    tree_y = np.ones(num_trees)
-    tree_x = np.linspace(0, ax.get_xlim()[1], num_trees)
-    tree_imgs = []
-    for i in range(num_trees):
-        im = ax.imshow(tree_icon,
-                    extent=[tree_x[i]-0.5, tree_x[i]+0.5, 0, 0], alpha = 0,
-                    zorder=0)
-        tree_imgs.append(im)
 
-    tree_speed = 10 * dt  # units per frame
+    car_icon = mpimg.imread(car_path)
+    tree_icon = mpimg.imread(tree_path)
+
+    N = cars_z_top.shape[0]
+    num_cars = 4
+    num_trees = 1
+    tree_speed = 10 * dt
+
+    # Initialize figure with two vertical subplots
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(20, 10))
+
+    for ax in [ax_top, ax_bot]:
+        ax.set_xlim(-5, 3 * d + 10)  # adjust depending on your scale
+        ax.set_ylim(0, 5)
+        ax.set_xlabel('Z (distance)')
+        ax.set_ylabel('Y')
+        
+    ax_top.set_title("Custom Controller")
+    ax_bot.set_title("PID Controller")
+
+    # --- Initialize cars ---
+    cars_imgs_top = [ax_top.imshow(car_icon, extent=[0,1,0,2], alpha=0.3, zorder=5) for _ in range(num_cars)]
+    cars_imgs_bot = [ax_bot.imshow(car_icon, extent=[0,1,0,2], alpha=0.3, zorder=5) for _ in range(num_cars)]
+
+    # --- Initialize trees ---
+    tree_x = np.linspace(0, ax_top.get_xlim()[1], num_trees)
+    tree_imgs_top = [ax_top.imshow(tree_icon, extent=[tree_x[i]-1, tree_x[i]+1, 0, 3], alpha=0, zorder=0) for i in range(num_trees)]
+    tree_imgs_bot = [ax_bot.imshow(tree_icon, extent=[tree_x[i]-1, tree_x[i]+1, 0, 3], alpha=0, zorder=0) for i in range(num_trees)]
+
     # --- Animation function ---
     def animate(k):
-        # update car positions
-        for i in range(4):
-            car_imgs[i].set_extent(extent=[cars_z[k,i]-1, cars_z[k,i]+1, 0, 2])
+        # Update cars
+        for i in range(num_cars):
+            cars_imgs_top[i].set_extent([cars_z_top[k,i]-1, cars_z_top[k,i]+1, 0, 2])
             if k > 0:
-                car_imgs[i].set_alpha(1)
-        # update trees
+                cars_imgs_top[i].set_alpha(1)
+            cars_imgs_bot[i].set_extent([cars_z_pid[k,i]-1, cars_z_pid[k,i]+1, 0, 2])
+            if k > 0:
+                cars_imgs_bot[i].set_alpha(1)
+            
+        # Update trees
         for i in range(num_trees):
-            if tree_imgs[i].get_extent()[0] + tree_speed > ax.get_xlim()[1]:
-                x0 = (tree_imgs[i].get_extent()[0] + tree_speed) - ax.get_xlim()[1] + ax.get_xlim()[0]
+            # Top subplot
+            if tree_imgs_top[i].get_extent()[0] + tree_speed > ax.get_xlim()[1]:
+                x0_top = (tree_imgs_top[i].get_extent()[0] + tree_speed) - ax.get_xlim()[1] + ax.get_xlim()[0]
             else:
-                x0 = tree_imgs[i].get_extent()[0] + tree_speed
-            x1 = x0 + 1
-
-            tree_imgs[i].set_extent([x0, x1, 0, 3])
+                x0_top = tree_imgs_top[i].get_extent()[0] + tree_speed
+            x1_top = x0_top + 2
+            tree_imgs_top[i].set_extent([x0_top, x1_top, 0, 3])
             if k > 0:
-                tree_imgs[i].set_alpha(0.5)
-        return car_imgs + tree_imgs
-    
-    # def animate(k):
-    #     for i in range(4):
-    #         car_imgs[i].set_extent(extent=[cars_z[k,i]-1, cars_z[k,i]+1, 0, 2])
-    #     return car_imgs
+                tree_imgs_top[i].set_alpha(0.2)
+            
+            # Bottom subplot
+            if tree_imgs_bot[i].get_extent()[0] + tree_speed > ax.get_xlim()[1]:
+                x0_bot = (tree_imgs_bot[i].get_extent()[0] + tree_speed) - ax.get_xlim()[1] + ax.get_xlim()[0]
+            else:
+                x0_bot = tree_imgs_bot[i].get_extent()[0] + tree_speed
+            x1_bot = x0_bot + 2
+            tree_imgs_bot[i].set_extent([x0_bot, x1_bot, 0, 3])
+            if k > 0:
+                tree_imgs_bot[i].set_alpha(0.2)
+        
+        return cars_imgs_top + cars_imgs_bot + tree_imgs_top + tree_imgs_bot
 
-    anim = FuncAnimation(fig, animate, frames = N, interval= dt*100, blit=True)
-
+    anim = FuncAnimation(fig, animate, frames=N, interval = dt*1000/2, blit=True)
+    anim.save('platoon_animation.gif', writer='imagemagick', fps=20)
+    plt.tight_layout()
     plt.show()
-
-    print("Optimal structured controller Kopt:",Kopt.D)
