@@ -1,16 +1,18 @@
 import numpy as np
 import control as ct
-from vectorize import mat_vec, orth_basis
+
 from scipy.linalg import solve_discrete_are, kron
-from h2_riccati import h2_state_feedback_gain, h2_kalman_filter_gain
-from Controllable_subspace import controllable_subspace
-import ivec_DTss
-import minreal
-from Controllable_subspace import minimal
-from feedback import lft
+from .h2_riccati import h2_state_feedback_gain, h2_kalman_filter_gain
+from .Controllable_subspace import controllable_subspace
+from . import ivec_DTss
+from .Controllable_subspace import minimal
+from .feedback import lft
 from control import norm
+from .vectorize import mat_vec, orth_basis
+
 
 import time
+
 class DiscreteGeneralizedPlant:
     """
     Class representing a discrete-time generalized plant:
