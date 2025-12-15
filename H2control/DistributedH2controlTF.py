@@ -150,7 +150,7 @@ def structured_output_feedback_h2(plant, rel_order, tol = 1e-6):
     Q_tilde = Q_tilde.astype(np.float64)
 
 
-    print(Ar, Brm)
+
     # Terminal Riccati
     Xred_list[m] = solve_discrete_are(Av_tilde, Brm, Q_tilde, Rm)
     Kred_list[m] = - np.linalg.inv(Brm.T @ Xred_list[m] @ Brm + Rm) @ ( Ar.T @ Xred_list[m] @ Brm + S).T  # simplified

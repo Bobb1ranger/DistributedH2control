@@ -169,8 +169,8 @@ if __name__ == "__main__":
     np.random.seed(42)
     w = np.random.normal(0, 0.2, size=(N, nw))  # small white noise
     impulse_index = int(1/dt)
-    w[impulse_index, 0] = 0  # first channel impulse at t=1s
-    w[impulse_index + 1, 0] = -0
+    w[impulse_index, 0] = -0.05  # first channel impulse at t=1s
+    w[impulse_index + 1, 0] = 0.06
 
     # Simulate
     x = np.zeros((N+1, nx))

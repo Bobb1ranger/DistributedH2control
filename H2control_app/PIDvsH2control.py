@@ -83,7 +83,7 @@ if __name__ == "__main__":
 
     for ii in range(1, nAgents):
         C2[ii, ii*3 - 1] = -1
-    print("C2:",C2)
+    # print("C2:",C2)
 
     # Control input
     B2 = kron(np.eye(nAgents), B0dt[:, [0]])
@@ -155,15 +155,21 @@ if __name__ == "__main__":
     D = np.vstack([top, bottom])
     P_platoon = ct.ss(A, B, C, D, dt)
     sys_cl = lft(P_platoon, Kopt)
-    pPID = 0.03
-    iPID = 0.001
-    dPID = 1
-    nPID = 0.05
+    pPID = 0.16
+    iPID = 0.005
+    dPID = 0.1
+    nPID = 2.5
     KPID_dt = pid_to_discrete_ss(pPID, iPID, dPID, nPID, dt, nAgents)
     # --- Example parameters ---
     sys_cl_PID = lft(P_platoon, KPID_dt)
 
-    Tsim = 20.0          # total simulation time in seconds
+
+
+    eigvals = np.linalg.eigvals(sys_cl_PID.A)
+    print(eigvals)
+    # exit()
+
+    Tsim = 80.0          # total simulation time in seconds
     N = int(Tsim/dt)     # number of steps
     nx = sys_cl.A.shape[0]  # state dimension
     nz = sys_cl.C.shape[0]  # output dimension
@@ -173,11 +179,11 @@ if __name__ == "__main__":
     x0 = np.zeros(nx)
 
     # --- Generate process noise w ---
-    np.random.seed(42)
-    w = np.random.normal(0, 0.1, size=(N, nw))  # small white noise
+    np.random.seed(23)
+    w = np.random.normal(0, 0.4*dt, size=(N, nw))  # small white noise
     impulse_index = int(1/dt)
-    w[impulse_index, 0] = 4.0  # first channel impulse at t=1s
-    w[impulse_index + 1, 0] = -4.0
+    w[impulse_index, 0] = -1.0  # first channel impulse at t=1s
+    w[impulse_index + 1, 0] = 1.0
 
     # Simulate
     x = np.zeros((N+1, nx))
@@ -260,7 +266,7 @@ if __name__ == "__main__":
     tree_speed = 10 * dt
 
     # Initialize figure with two vertical subplots
-    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(20, 10))
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(16, 6))
 
     for ax in [ax_top, ax_bot]:
         ax.set_xlim(-5, 3 * d + 10)  # adjust depending on your scale
@@ -268,12 +274,27 @@ if __name__ == "__main__":
         ax.set_xlabel('Z (distance)')
         ax.set_ylabel('Y')
         
-    ax_top.set_title("Custom Controller")
-    ax_bot.set_title("PID Controller")
+    ax_top.set_title(
+        "Distributed H2 Controller",
+        fontsize=16,
+        fontweight='bold'
+    )
+
+    ax_bot.set_title(
+        "PID Controller",
+        fontsize=16,
+        fontweight='bold'
+    )
+    ghost_imgs = []
+    for i in range(num_cars):
+        im = ax_top.imshow(car_icon, extent=[cars_z_top[0,i]-1, cars_z_top[0,i]+1, 0, 2], alpha=0.3, zorder=1)
+        ghost_imgs.append(im)
+        im = ax_bot.imshow(car_icon, extent=[cars_z_pid[0,i]-1, cars_z_pid[0,i]+1, 0, 2], alpha=0.3, zorder=1)
+        ghost_imgs.append(im)
 
     # --- Initialize cars ---
-    cars_imgs_top = [ax_top.imshow(car_icon, extent=[0,1,0,2], alpha=0.3, zorder=5) for _ in range(num_cars)]
-    cars_imgs_bot = [ax_bot.imshow(car_icon, extent=[0,1,0,2], alpha=0.3, zorder=5) for _ in range(num_cars)]
+    cars_imgs_top = [ax_top.imshow(car_icon, extent=[0,1,0,2], alpha=0, zorder=5) for _ in range(num_cars)]
+    cars_imgs_bot = [ax_bot.imshow(car_icon, extent=[0,1,0,2], alpha=0, zorder=5) for _ in range(num_cars)]
 
     # --- Initialize trees ---
     tree_x = np.linspace(0, ax_top.get_xlim()[1], num_trees)
@@ -314,8 +335,9 @@ if __name__ == "__main__":
                 tree_imgs_bot[i].set_alpha(0.2)
         
         return cars_imgs_top + cars_imgs_bot + tree_imgs_top + tree_imgs_bot
-
-    anim = FuncAnimation(fig, animate, frames=N, interval = dt*1000/2, blit=True)
-    anim.save('platoon_animation.gif', writer='imagemagick', fps=20)
+    frames_plot = range(0, N, 10)
+    anim = FuncAnimation(fig, animate, frames = frames_plot, interval = dt*1000/4, blit=True)
+    
     plt.tight_layout()
     plt.show()
+    anim.save('platoon_animation.gif', writer='pillow', fps=20)

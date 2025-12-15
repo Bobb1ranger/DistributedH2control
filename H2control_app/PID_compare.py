@@ -40,8 +40,8 @@ def pid_to_discrete_ss(P, I, D, n, dt, n_channels=3):
                    [0, -n]])
     Bc = np.array([[1],
                    [1]])
-    Cc = np.array([[I, D*n]])
-    Dc = np.array([[P]])
+    Cc = np.array([[I, - D* (n ** 2)]])
+    Dc = np.array([[P + D * n]])
     
     # Augment for integrator: x_i_dot = error (u input)
     # Already handled by first row of Ac/Bc
@@ -199,10 +199,10 @@ if __name__ == "__main__":
 
     # --- Generate process noise w ---
     np.random.seed(42)
-    w = np.random.normal(0, 0.1, size=(N, nw))  # small white noise
+    w = np.random.normal(0, 0.2, size=(N, nw))  # small white noise
     impulse_index = int(1/dt)
-    w[impulse_index, 0] = 4.0  # first channel impulse at t=1s
-    w[impulse_index + 1, 0] = -4.0
+    w[impulse_index, 0] = 2  # first channel impulse at t=1s
+    w[impulse_index + 1, 0] = -2
     # --- Closed-loop system ---
     # Suppose sys_cl = ss(A_cl, B_w, C_cl, D_w) with feedback applied
     # For example: sys_cl = control.lft(P, K)
